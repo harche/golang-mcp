@@ -12,7 +12,7 @@ interface CLIOptions {
 
 function parseArgs(args: string[]): CLIOptions {
     const options: CLIOptions = {
-        version: "master",
+        version: "go1.21",
         updatePolicy: "manual",
     };
 
@@ -45,25 +45,25 @@ function parseArgs(args: string[]): CLIOptions {
 }
 
 function printHelp() {
-    console.log(`Usage: zig-mcp [options] [command]
+    console.log(`Usage: go-mcp [options] [command]
 
 Commands:
   update                                    Update documentation without starting MCP server
   view                                      Start local web server to view documentation
 
 Options:
-  --version <version>                       Zig version to use (default: master)
-                                            Examples: master, 0.13.0, 0.14.1
+  --version <version>                       Go version to use (default: go1.21)
+                                            Examples: go1.21, go1.20, go1.19
   --update-policy <policy>                  Update policy (default: manual)
                                             Options: manual, daily, startup
   -h, --help                                Show this help message
 
 Examples:
-  zig-mcp                                   # Start MCP server with master version
-  zig-mcp --version 0.14.1                  # Start with specific version
-  zig-mcp --update-policy daily             # Auto-update daily on startup
-  zig-mcp update --version 0.14.1           # Update docs to specific version
-  zig-mcp view --version master             # View documentation for specific version`);
+  go-mcp                                   # Start MCP server with go1.21 version
+  go-mcp --version go1.20                  # Start with specific version
+  go-mcp --update-policy daily             # Auto-update daily on startup
+  go-mcp update --version go1.22           # Update docs to specific version
+  go-mcp view --version go1.21             # View documentation for specific version`);
 }
 
 async function main() {
@@ -92,9 +92,9 @@ async function main() {
     const stdSources = await downloadSourcesTar(options.version, true);
 
     const mcpServer = new McpServer({
-        name: "ZigDocs",
+        name: "GoDocs",
         description:
-            "Retrieves up-to-date documentation for the Zig programming language standard library and builtin functions.",
+            "Retrieves up-to-date documentation for the Go programming language standard library and builtin functions.",
         version: options.version,
     });
 

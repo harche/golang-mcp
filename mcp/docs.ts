@@ -8,12 +8,12 @@ import extractBuiltinFunctions, { type BuiltinFunction } from "./extract-builtin
 export type UpdatePolicy = "manual" | "daily" | "startup";
 
 export async function ensureDocs(
-    zigVersion: string,
+    goVersion: string,
     updatePolicy: UpdatePolicy = "manual",
     isMcpMode = true,
 ): Promise<BuiltinFunction[]> {
-    const paths = envPaths("zig-mcp", { suffix: "" });
-    const metadataPath = path.join(paths.cache, zigVersion, "metadata.json");
+    const paths = envPaths("go-mcp", { suffix: "" });
+    const metadataPath = path.join(paths.cache, goVersion, "metadata.json");
 
     let shouldUpdate = false;
 
@@ -36,8 +36,8 @@ export async function ensureDocs(
 
     if (shouldUpdate) {
         try {
-            if (!isMcpMode) console.log(`Updating documentation for Zig version: ${zigVersion}`);
-            const builtinFunctions = await extractBuiltinFunctions(zigVersion, isMcpMode);
+            if (!isMcpMode) console.log(`Updating documentation for Go version: ${goVersion}`);
+            const builtinFunctions = await extractBuiltinFunctions(goVersion, isMcpMode);
 
             const dir = path.dirname(metadataPath);
             if (!fs.existsSync(dir)) {
@@ -49,7 +49,7 @@ export async function ensureDocs(
                 JSON.stringify(
                     {
                         lastUpdate: Date.now(),
-                        version: zigVersion,
+                        version: goVersion,
                     },
                     null,
                     2,
@@ -57,29 +57,29 @@ export async function ensureDocs(
             );
 
             if (!isMcpMode)
-                console.log(`Successfully updated documentation for Zig version: ${zigVersion}`);
+                console.log(`Successfully updated documentation for Go version: ${goVersion}`);
             return builtinFunctions;
         } catch (error) {
             if (error instanceof Error && error.message.includes("404")) {
                 console.error(
-                    `Error: Zig version '${zigVersion}' not found on ziglang.org. Please check the version number.`,
+                    `Error: Go version '${goVersion}' not found on golang.org. Please check the version number.`,
                 );
             } else {
-                console.error(`Error updating documentation for version ${zigVersion}:`, error);
+                console.error(`Error updating documentation for version ${goVersion}:`, error);
             }
             throw error;
         }
     }
 
-    return await extractBuiltinFunctions(zigVersion, isMcpMode);
+    return await extractBuiltinFunctions(goVersion, isMcpMode);
 }
 
 export async function downloadSourcesTar(
-    zigVersion: string,
+    goVersion: string,
     isMcpMode: boolean = false,
 ): Promise<Uint8Array> {
-    const paths = envPaths("zig-mcp", { suffix: "" });
-    const versionCacheDir = path.join(paths.cache, zigVersion);
+    const paths = envPaths("go-mcp", { suffix: "" });
+    const versionCacheDir = path.join(paths.cache, goVersion);
     const sourcesPath = path.join(versionCacheDir, "sources.tar");
 
     if (fs.existsSync(sourcesPath)) {
@@ -87,13 +87,13 @@ export async function downloadSourcesTar(
         return new Uint8Array(fs.readFileSync(sourcesPath));
     }
 
-    const url = `https://ziglang.org/documentation/${zigVersion}/std/sources.tar`;
-    if (!isMcpMode) console.log(`Downloading sources.tar from: ${url}`);
+    const url = `https://golang.org/dl/${goVersion}.src.tar.gz`;
+    if (!isMcpMode) console.log(`Downloading sources.tar.gz from: ${url}`);
 
     const response = await fetch(url);
     if (!response.ok) {
         throw new Error(
-            `Failed to download sources.tar from ${url}: ${response.status} ${response.statusText}`,
+            `Failed to download sources.tar.gz from ${url}: ${response.status} ${response.statusText}`,
         );
     }
 
@@ -105,31 +105,28 @@ export async function downloadSourcesTar(
     }
 
     fs.writeFileSync(sourcesPath, uint8Array);
-    if (!isMcpMode) console.log(`Downloaded sources.tar to ${sourcesPath}`);
+    if (!isMcpMode) console.log(`Downloaded sources.tar.gz to ${sourcesPath}`);
 
     return uint8Array;
 }
 
-async function downloadSourcesTarPath(zigVersion: string): Promise<string> {
-    const paths = envPaths("zig-mcp", { suffix: "" });
-    const versionCacheDir = path.join(paths.cache, zigVersion);
+async function downloadSourcesTarPath(goVersion: string): Promise<string> {
+    const paths = envPaths("go-mcp", { suffix: "" });
+    const versionCacheDir = path.join(paths.cache, goVersion);
     const sourcesPath = path.join(versionCacheDir, "sources.tar");
 
     if (fs.existsSync(sourcesPath)) {
-        console.log(`Using cached sources.tar from ${sourcesPath}`);
+        console.log(`Using cached sources.tar.gz from ${sourcesPath}`);
         return sourcesPath;
     }
 
-    await downloadSourcesTar(zigVersion, false);
+    await downloadSourcesTar(goVersion, false);
     return sourcesPath;
 }
 
-export async function startViewServer(zigVersion: string): Promise<void> {
+export async function startViewServer(goVersion: string): Promise<void> {
     try {
-        const sourcesPath = await downloadSourcesTarPath(zigVersion);
-
         const currentDir = path.dirname(fileURLToPath(import.meta.url));
-        const wasmPath = path.join(currentDir, "main.wasm");
         const indexPath = path.join(currentDir, "index.html");
         const stdJsPath = path.join(currentDir, "std.js");
 
@@ -143,10 +140,6 @@ export async function startViewServer(zigVersion: string): Promise<void> {
                 filePath = indexPath;
             } else if (url === "/std.js") {
                 filePath = stdJsPath;
-            } else if (url === "/main.wasm") {
-                filePath = wasmPath;
-            } else if (url === "/sources.tar") {
-                filePath = sourcesPath;
             } else {
                 res.writeHead(404);
                 res.end("File not found");
@@ -164,8 +157,6 @@ export async function startViewServer(zigVersion: string): Promise<void> {
                 ".html": "text/html",
                 ".js": "text/javascript",
                 ".css": "text/css",
-                ".wasm": "application/wasm",
-                ".tar": "application/x-tar",
             };
 
             const contentType = contentTypes[ext] || "application/octet-stream";
@@ -177,7 +168,7 @@ export async function startViewServer(zigVersion: string): Promise<void> {
         server.listen(port, () => {
             const url = `http://localhost:${port}`;
             console.log(`Server started at ${url}`);
-            console.log(`Serving Zig ${zigVersion} documentation`);
+            console.log(`Serving Go ${goVersion} documentation`);
             console.log("Press Ctrl+C to stop the server");
         });
 

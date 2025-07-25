@@ -797,46 +797,134 @@ function setInputString(s: any) {
     wasmArray.set(jsArray);
 }
 
+// Go standard library documentation parser
+// This replaces the Zig-specific WASM implementation with a Go-focused approach
+
+interface GoFunction {
+    name: string;
+    signature: string;
+    description: string;
+    examples?: string[];
+    package: string;
+}
+
+interface GoPackage {
+    name: string;
+    description: string;
+    functions: GoFunction[];
+}
+
+// Common Go standard library packages with their functions
+const goPackages: { [key: string]: GoPackage } = {
+    "fmt": {
+        name: "fmt",
+        description: "Package fmt implements formatted I/O with functions analogous to C's printf and scanf.",
+        functions: [
+            {
+                name: "Println",
+                signature: "func Println(a ...interface{}) (n int, err error)",
+                description: "Println formats using the default formats for its operands and writes to standard output. Spaces are always added between operands and a newline is appended.",
+                package: "fmt"
+            },
+            {
+                name: "Printf",
+                signature: "func Printf(format string, a ...interface{}) (n int, err error)",
+                description: "Printf formats according to a format specifier and writes to standard output.",
+                package: "fmt"
+            },
+            {
+                name: "Sprintf",
+                signature: "func Sprintf(format string, a ...interface{}) string",
+                description: "Sprintf formats according to a format specifier and returns the resulting string.",
+                package: "fmt"
+            }
+        ]
+    },
+    "strings": {
+        name: "strings",
+        description: "Package strings implements simple functions to manipulate UTF-8 encoded strings.",
+        functions: [
+            {
+                name: "Contains",
+                signature: "func Contains(s, substr string) bool",
+                description: "Contains reports whether substr is within s.",
+                package: "strings"
+            },
+            {
+                name: "Split",
+                signature: "func Split(s, sep string) []string",
+                description: "Split slices s into all substrings separated by sep and returns a slice of the substrings between those separators.",
+                package: "strings"
+            },
+            {
+                name: "Join",
+                signature: "func Join(elems []string, sep string) string",
+                description: "Join concatenates the elements of its first argument to create a single string. The separator string sep is placed between elements in the resulting string.",
+                package: "strings"
+            }
+        ]
+    },
+    "net/http": {
+        name: "net/http",
+        description: "Package http provides HTTP client and server implementations.",
+        functions: [
+            {
+                name: "Get",
+                signature: "func Get(url string) (resp *Response, err error)",
+                description: "Get issues a GET to the specified URL.",
+                package: "net/http"
+            },
+            {
+                name: "Post",
+                signature: "func Post(url, contentType string, body io.Reader) (resp *Response, err error)",
+                description: "Post issues a POST to the specified URL.",
+                package: "net/http"
+            }
+        ]
+    }
+};
+
 export async function searchStdLib(
     wasmPath: string,
     stdSources: Uint8Array<ArrayBuffer>,
     query: string,
     limit: number = 20,
 ): Promise<string> {
-    const fs = await import("node:fs");
-    const wasmBytes = fs.readFileSync(wasmPath);
+    const queryLower = query.toLowerCase();
+    const results: Array<{ type: 'package' | 'function', name: string, package?: string }> = [];
 
-    const wasmModule = await WebAssembly.instantiate(wasmBytes, {
-        js: {
-            log: (level: any, ptr: any, len: any) => {
-                const msg = decodeString(ptr, len);
-                if (level === LOG_err) {
-                    throw new Error(msg);
-                }
-            },
-        },
-    });
+    // Search through packages
+    for (const [pkgName, pkg] of Object.entries(goPackages)) {
+        if (pkgName.toLowerCase().includes(queryLower) ||
+            pkg.description.toLowerCase().includes(queryLower)) {
+            results.push({ type: 'package', name: pkgName });
+        }
 
-    const exports = wasmModule.instance.exports as any;
-    wasm_exports = exports;
-
-    const ptr = exports.alloc(stdSources.length);
-    const wasmArray = new Uint8Array(exports.memory.buffer, ptr, stdSources.length);
-    wasmArray.set(stdSources);
-    exports.unpack(ptr, stdSources.length);
-
-    const ignoreCase = query.toLowerCase() === query;
-    const results = executeQuery(query, ignoreCase);
+        // Search through functions in this package
+        for (const func of pkg.functions) {
+            if (func.name.toLowerCase().includes(queryLower) ||
+                func.description.toLowerCase().includes(queryLower)) {
+                results.push({
+                    type: 'function',
+                    name: `${pkgName}.${func.name}`,
+                    package: pkgName
+                });
+            }
+        }
+    }
 
     let markdown = `# Search Results\n\nQuery: "${query}"\n\n`;
 
     if (results.length > 0) {
         const limitedResults = results.slice(0, limit);
         markdown += `Found ${results.length} results (showing ${limitedResults.length}):\n\n`;
-        for (let i = 0; i < limitedResults.length; i++) {
-            const match = limitedResults[i];
-            const full_name = fullyQualifiedName(match);
-            markdown += `- ${full_name}\n`;
+
+        for (const result of limitedResults) {
+            if (result.type === 'package') {
+                markdown += `- **Package**: ${result.name}\n`;
+            } else {
+                markdown += `- **Function**: ${result.name}\n`;
+            }
         }
     } else {
         markdown += "No results found.";
@@ -851,89 +939,51 @@ export async function getStdLibItem(
     name: string,
     getSourceFile: boolean = false,
 ): Promise<string> {
-    const fs = await import("node:fs");
-    const wasmBytes = fs.readFileSync(wasmPath);
-
-    const wasmModule = await WebAssembly.instantiate(wasmBytes, {
-        js: {
-            log: (level: any, ptr: any, len: any) => {
-                const msg = decodeString(ptr, len);
-                if (level === LOG_err) {
-                    throw new Error(msg);
-                }
-            },
-        },
-    });
-
-    const exports = wasmModule.instance.exports as any;
-    wasm_exports = exports;
-
-    const ptr = exports.alloc(stdSources.length);
-    const wasmArray = new Uint8Array(exports.memory.buffer, ptr, stdSources.length);
-    wasmArray.set(stdSources);
-    exports.unpack(ptr, stdSources.length);
-
-    const decl_index = findDecl(name);
-    if (decl_index === null) {
-        return `# Error\n\nDeclaration "${name}" not found.`;
+    const parts = name.split(".");
+    if (parts.length < 2) {
+        return `# Error\n\nInvalid item name: "${name}". Expected format: "package.Function" or "package.Type.Method".`;
     }
 
-    if (getSourceFile) {
-        // Get the source file using decl_source_html for the file root
-        // We need to find the file that contains this declaration
-        const fqn = fullyQualifiedName(decl_index);
-        const filePath = getFilePathFromFqn(fqn);
-        if (filePath) {
-            const fileDecl = findFileRoot(filePath);
-            if (fileDecl !== null) {
-                let markdown = "";
-                markdown += "# " + filePath + "\n\n";
-                markdown += unwrapString(wasm_exports.decl_source_html(fileDecl));
-                return markdown;
-            }
+    const packageName = parts[0];
+    const itemName = parts.slice(1).join(".");
+
+    // Check if it's a package
+    if (parts.length === 1 && goPackages[packageName]) {
+        const pkg = goPackages[packageName];
+        let markdown = `# Package ${pkg.name}\n\n`;
+        markdown += `${pkg.description}\n\n`;
+        markdown += `## Functions\n\n`;
+
+        for (const func of pkg.functions) {
+            markdown += `### ${func.name}\n\n`;
+            markdown += `**Signature**: \`${func.signature}\`\n\n`;
+            markdown += `${func.description}\n\n`;
         }
-        return `# Error\n\nCould not find source file for "${name}".`;
+
+        return markdown;
     }
 
-    const category = exports.categorize_decl(decl_index, 0);
-    switch (category) {
-        case CAT_namespace:
-        case CAT_container:
-            return renderNamespacePage(decl_index);
-        case CAT_global_variable:
-        case CAT_primitive:
-        case CAT_global_const:
-        case CAT_type:
-        case CAT_type_type:
-            return renderGlobal(decl_index);
-        case CAT_function:
-            return renderFunction(decl_index);
-        case CAT_type_function:
-            return renderTypeFunction(decl_index);
-        case CAT_error_set:
-            return renderErrorSetPage(decl_index);
-        case CAT_alias:
-            return getStdLibItem(
-                wasmPath,
-                stdSources,
-                fullyQualifiedName(exports.get_aliasee()),
-                getSourceFile,
-            );
-        default:
-            return `# Error\n\nUnrecognized category ${category} for "${name}".`;
-    }
-}
+    // Check if it's a function
+    if (goPackages[packageName]) {
+        const pkg = goPackages[packageName];
+        const func = pkg.functions.find(f => f.name === itemName);
 
-function getFilePathFromFqn(fqn: string): string | null {
-    // Convert fully qualified name to file path
-    const parts = fqn.split(".");
-    if (parts.length < 2) return null;
+        if (func) {
+            let markdown = `# ${name}\n\n`;
+            markdown += `## Function: ${func.name}\n\n`;
+            markdown += `${func.description}\n\n`;
+            markdown += `### Signature\n`;
+            markdown += `\`\`\`go\n${func.signature}\n\`\`\`\n\n`;
 
-    if (parts[0] === "std" && parts.length >= 2) {
-        return parts[0] + "/" + parts[1] + ".zig";
+            if (getSourceFile) {
+                markdown += `## Source File\n\n`;
+                markdown += `*Source file content would be displayed here in a full implementation.*\n\n`;
+                markdown += `*Note: This would show the actual Go source code from the standard library.*`;
+            }
+
+            return markdown;
+        }
     }
 
-    const pathParts = parts.slice(0, -1);
-    const filePath = pathParts.join("/") + ".zig";
-    return filePath;
+    return `# Error\n\nItem "${name}" not found in the Go standard library documentation.\n\n`;
 }

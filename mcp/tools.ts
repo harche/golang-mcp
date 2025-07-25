@@ -10,7 +10,7 @@ function createListBuiltinFunctionsTool(builtinFunctions: BuiltinFunction[]) {
         name: "list_builtin_functions",
         config: {
             description:
-                "Lists all available Zig builtin functions. Builtin functions are provided by the compiler and are prefixed with '@'. The comptime keyword on a parameter means that the parameter must be known at compile time. Use this to discover what functions are available, then use 'get_builtin_function' to get detailed documentation.",
+                "Lists all available Go builtin functions. Builtin functions are provided by the language and include functions like `len()`, `cap()`, `make()`, `new()`, `append()`, `copy()`, `delete()`, `complex()`, `real()`, `imag()`, `panic()`, and `recover()`. Use this to discover what functions are available, then use 'get_builtin_function' to get detailed documentation.",
         },
         handler: async () => {
             const functionList = builtinFunctions.map((fn) => `- ${fn.signature}`).join("\n");
@@ -33,13 +33,13 @@ function getBuiltinFunctionTool(builtinFunctions: BuiltinFunction[]) {
         name: "get_builtin_function",
         config: {
             description:
-                "Search for Zig builtin functions by name and get their documentation, signatures, and usage information. Returns all matching functions ranked by relevance.",
+                "Search for Go builtin functions by name and get their documentation, signatures, and usage information. Returns all matching functions ranked by relevance.",
             inputSchema: {
                 function_name: z
                     .string()
                     .min(1, "Query cannot be empty")
                     .describe(
-                        "Function name or keywords (e.g., '@addWithOverflow', 'overflow', 'atomic')",
+                        "Function name or keywords (e.g., 'len', 'make', 'append', 'panic')",
                     ),
             },
         },
@@ -51,7 +51,7 @@ function getBuiltinFunctionTool(builtinFunctions: BuiltinFunction[]) {
                     content: [
                         {
                             type: "text" as const,
-                            text: "Please provide a function name or keywords. Try searching for a function name like '@addWithOverflow' or keywords like 'overflow' or 'atomic'.",
+                            text: "Please provide a function name or keywords. Try searching for a function name like 'len' or keywords like 'slice' or 'map'.",
                         },
                     ],
                 };
@@ -86,7 +86,7 @@ function getBuiltinFunctionTool(builtinFunctions: BuiltinFunction[]) {
             }
 
             const results = scoredFunctions
-                .map((fn) => `**${fn.func}**\n\`\`\`zig\n${fn.signature}\n\`\`\`\n\n${fn.docs}`)
+                .map((fn) => `**${fn.func}**\n\`\`\`go\n${fn.signature}\n\`\`\`\n\n${fn.docs}`)
                 .join("\n\n---\n\n");
 
             const message =
@@ -111,13 +111,13 @@ function searchStdLibTool(wasmPath: string, stdSources: Uint8Array<ArrayBuffer>)
         name: "search_std_lib",
         config: {
             description:
-                "Search the Zig standard library for functions, types, namespaces, and other declarations. Returns detailed markdown documentation for each matching item. Use this to explore the standard library and discover available functionality. Supports fuzzy matching and returns results ranked by relevance.",
+                "Search the Go standard library for functions, types, packages, and other declarations. Returns detailed markdown documentation for each matching item. Use this to explore the standard library and discover available functionality. Supports fuzzy matching and returns results ranked by relevance.",
             inputSchema: {
                 query: z
                     .string()
                     .min(1, "Search query cannot be empty")
                     .describe(
-                        "Search terms to find in the standard library (e.g., 'ArrayList', 'print', 'allocator', 'HashMap')",
+                        "Search terms to find in the standard library (e.g., 'fmt', 'strings', 'http', 'json')",
                     ),
                 limit: z
                     .number()
@@ -157,13 +157,13 @@ function getStdLibItemTool(wasmPath: string, stdSources: Uint8Array<ArrayBuffer>
         name: "get_std_lib_item",
         config: {
             description:
-                "Get detailed documentation for a specific item in the Zig standard library. Provide the fully qualified name (e.g., 'std.ArrayList', 'std.debug.print', 'std.mem.Allocator') to get comprehensive documentation including function signatures, parameters, return types, error sets, example usage, and optionally source code.",
+                "Get detailed documentation for a specific item in the Go standard library. Provide the fully qualified name (e.g., 'fmt.Println', 'strings.Contains', 'net/http.Get') to get comprehensive documentation including function signatures, parameters, return types, error handling, example usage, and optionally source code.",
             inputSchema: {
                 name: z
                     .string()
                     .min(1, "Item name cannot be empty")
                     .describe(
-                        "Fully qualified name of the standard library item (e.g., 'std.ArrayList', 'std.debug.print', 'std.mem.Allocator')",
+                        "Fully qualified name of the standard library item (e.g., 'fmt.Println', 'strings.Contains', 'net/http.Get')",
                     ),
                 get_source_file: z
                     .boolean()
