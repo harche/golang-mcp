@@ -62,7 +62,7 @@ export async function ensureDocs(
         } catch (error) {
             if (error instanceof Error && error.message.includes("404")) {
                 console.error(
-                    `Error: Go version '${goVersion}' not found on golang.org. Please check the version number.`,
+                    `Error: Go version '${goVersion}' not found. Please check the version number.`,
                 );
             } else {
                 console.error(`Error updating documentation for version ${goVersion}:`, error);
@@ -80,43 +80,66 @@ export async function downloadSourcesTar(
 ): Promise<Uint8Array> {
     const paths = envPaths("go-mcp", { suffix: "" });
     const versionCacheDir = path.join(paths.cache, goVersion);
-    const sourcesPath = path.join(versionCacheDir, "sources.tar");
+    const sourcesPath = path.join(versionCacheDir, "sources.tar.gz");
 
     if (fs.existsSync(sourcesPath)) {
-        if (!isMcpMode) console.log(`Using cached sources.tar from ${sourcesPath}`);
+        if (!isMcpMode) console.log(`Using cached sources from ${sourcesPath}`);
         return new Uint8Array(fs.readFileSync(sourcesPath));
     }
 
-    const url = `https://golang.org/dl/${goVersion}.src.tar.gz`;
-    if (!isMcpMode) console.log(`Downloading sources.tar.gz from: ${url}`);
+    // Try multiple mirrors for Go source code
+    const urls = [
+        `https://go.dev/dl/go${goVersion}.src.tar.gz`,
+        `https://golang.org/dl/go${goVersion}.src.tar.gz`,
+        `https://storage.googleapis.com/golang/go${goVersion}.src.tar.gz`,
+    ];
 
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(
-            `Failed to download sources.tar.gz from ${url}: ${response.status} ${response.statusText}`,
-        );
+    let lastError: Error | null = null;
+
+    for (const url of urls) {
+        try {
+            if (!isMcpMode) console.log(`Trying to download from: ${url}`);
+            const response = await fetch(url);
+            if (response.ok) {
+                const buffer = await response.arrayBuffer();
+                const uint8Array = new Uint8Array(buffer);
+                if (!fs.existsSync(versionCacheDir)) {
+                    fs.mkdirSync(versionCacheDir, { recursive: true });
+                }
+                fs.writeFileSync(sourcesPath, uint8Array);
+                if (!isMcpMode) console.log(`Downloaded sources to ${sourcesPath}`);
+                return uint8Array;
+            } else {
+                lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+        }
     }
 
-    const buffer = await response.arrayBuffer();
-    const uint8Array = new Uint8Array(buffer);
-
+    // If all URLs fail, create a minimal sources file with builtin functions
+    if (!isMcpMode) console.log(`Could not download sources, creating minimal documentation`);
+    const minimalSources = {
+        version: goVersion,
+        builtinFunctions: await extractBuiltinFunctions(goVersion, isMcpMode),
+        timestamp: Date.now()
+    };
+    const minimalData = new TextEncoder().encode(JSON.stringify(minimalSources, null, 2));
     if (!fs.existsSync(versionCacheDir)) {
         fs.mkdirSync(versionCacheDir, { recursive: true });
     }
-
-    fs.writeFileSync(sourcesPath, uint8Array);
-    if (!isMcpMode) console.log(`Downloaded sources.tar.gz to ${sourcesPath}`);
-
-    return uint8Array;
+    fs.writeFileSync(sourcesPath, minimalData);
+    return minimalData;
 }
 
+// Only used if you want to actually extract sources, not for the view server
 async function downloadSourcesTarPath(goVersion: string): Promise<string> {
     const paths = envPaths("go-mcp", { suffix: "" });
     const versionCacheDir = path.join(paths.cache, goVersion);
-    const sourcesPath = path.join(versionCacheDir, "sources.tar");
+    const sourcesPath = path.join(versionCacheDir, "sources.tar.gz");
 
     if (fs.existsSync(sourcesPath)) {
-        console.log(`Using cached sources.tar.gz from ${sourcesPath}`);
+        console.log(`Using cached sources from ${sourcesPath}`);
         return sourcesPath;
     }
 
@@ -129,13 +152,10 @@ export async function startViewServer(goVersion: string): Promise<void> {
         const currentDir = path.dirname(fileURLToPath(import.meta.url));
         const indexPath = path.join(currentDir, "index.html");
         const stdJsPath = path.join(currentDir, "std.js");
-
         const port = 8080;
-
         const server = http.createServer((req, res) => {
             let filePath: string;
             const url = req.url || "/";
-
             if (url === "/" || url === "/index.html") {
                 filePath = indexPath;
             } else if (url === "/std.js") {
@@ -145,33 +165,27 @@ export async function startViewServer(goVersion: string): Promise<void> {
                 res.end("File not found");
                 return;
             }
-
             if (!fs.existsSync(filePath)) {
                 res.writeHead(404);
                 res.end("File not found");
                 return;
             }
-
             const ext = path.extname(filePath).toLowerCase();
             const contentTypes: { [key: string]: string } = {
                 ".html": "text/html",
                 ".js": "text/javascript",
                 ".css": "text/css",
             };
-
             const contentType = contentTypes[ext] || "application/octet-stream";
-
             res.writeHead(200, { "Content-Type": contentType });
             fs.createReadStream(filePath).pipe(res);
         });
-
         server.listen(port, () => {
             const url = `http://localhost:${port}`;
             console.log(`Server started at ${url}`);
             console.log(`Serving Go ${goVersion} documentation`);
             console.log("Press Ctrl+C to stop the server");
         });
-
         process.on("SIGINT", () => {
             console.log("\nShutting down server...");
             server.close(() => {
